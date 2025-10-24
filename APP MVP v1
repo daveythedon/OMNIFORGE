@@ -1,0 +1,1244 @@
+import React, { useState, useEffect } from 'react';
+import { Calendar, DollarSign, MessageSquare, Phone, MapPin, Clock, CheckCircle, Zap, Database, Webhook, TrendingUp, Users, BarChart3, CreditCard } from 'lucide-react';
+import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
+
+const TradeFlowMVP = () => {
+  const [view, setView] = useState('dashboard');
+  const [jobs, setJobs] = useState([]);
+  const [clients, setClients] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [automationLog, setAutomationLog] = useState([]);
+  const [showAutomationPanel, setShowAutomationPanel] = useState(false);
+  const [selectedClient, setSelectedClient] = useState(null);
+
+  const [newBooking, setNewBooking] = useState({
+    customer: '',
+    phone: '',
+    service: 'HVAC Repair',
+    address: '',
+    date: '',
+    time: '',
+    notes: ''
+  });
+
+  const [selectedJob, setSelectedJob] = useState(null);
+
+  const services = ['HVAC Repair', 'Plumbing', 'Electrical', 'Carpentry', 'Painting', 'Appliance Repair'];
+
+  const statusConfig = {
+    new: { label: 'New Leads', color: 'bg-blue-500', hex: '#3b82f6', icon: Phone },
+    scheduled: { label: 'Scheduled', color: 'bg-yellow-500', hex: '#eab308', icon: Calendar },
+    'in-progress': { label: 'In Progress', color: 'bg-purple-500', hex: '#a855f7', icon: Clock },
+    done: { label: 'Completed', color: 'bg-green-500', hex: '#22c55e', icon: CheckCircle }
+  };
+
+  const API = {
+    async loadJobs() {
+      try {
+        const result = await window.storage.get('tradeflow-jobs');
+        return result ? JSON.parse(result.value) : [
+          {
+            id: 1,
+            customer: 'Sarah Johnson',
+            phone: '(555) 123-4567',
+            service: 'HVAC Repair',
+            address: '123 Main St, Austin TX',
+            status: 'new',
+            date: '2025-10-24',
+            time: '2:00 PM',
+            value: 350,
+            notes: 'AC not cooling properly',
+            createdAt: '2025-10-20T10:30:00.000Z'
+          },
+          {
+            id: 2,
+            customer: 'Mike Chen',
+            phone: '(555) 234-5678',
+            service: 'Plumbing',
+            address: '456 Oak Ave, Austin TX',
+            status: 'scheduled',
+            date: '2025-10-25',
+            time: '10:00 AM',
+            value: 450,
+            notes: 'Kitchen sink leak',
+            createdAt: '2025-10-21T14:20:00.000Z'
+          },
+          {
+            id: 3,
+            customer: 'Lisa Martinez',
+            phone: '(555) 345-6789',
+            service: 'Electrical',
+            address: '789 Pine Dr, Austin TX',
+            status: 'done',
+            date: '2025-10-23',
+            time: '9:00 AM',
+            value: 275,
+            paid: true,
+            notes: 'Install ceiling fan',
+            createdAt: '2025-10-19T08:15:00.000Z',
+            completedAt: '2025-10-23T11:30:00.000Z'
+          },
+          {
+            id: 4,
+            customer: 'Sarah Johnson',
+            phone: '(555) 123-4567',
+            service: 'Plumbing',
+            address: '123 Main St, Austin TX',
+            status: 'done',
+            date: '2025-10-18',
+            time: '3:00 PM',
+            value: 225,
+            paid: true,
+            notes: 'Fixed leaky faucet',
+            createdAt: '2025-10-15T09:00:00.000Z',
+            completedAt: '2025-10-18T16:45:00.000Z'
+          },
+          {
+            id: 5,
+            customer: 'David Park',
+            phone: '(555) 456-7890',
+            service: 'HVAC Repair',
+            address: '321 Elm St, Austin TX',
+            status: 'done',
+            date: '2025-10-22',
+            time: '1:00 PM',
+            value: 520,
+            paid: true,
+            notes: 'Annual maintenance',
+            createdAt: '2025-10-20T11:00:00.000Z',
+            completedAt: '2025-10-22T15:20:00.000Z'
+          }
+        ];
+      } catch (e) {
+        return [];
+      }
+    },
+
+    async saveJobs(jobs) {
+      await window.storage.set('tradeflow-jobs', JSON.stringify(jobs));
+    },
+
+    async createJob(jobData) {
+      const newJob = {
+        ...jobData,
+        id: Date.now(),
+        status: 'new',
+        createdAt: new Date().toISOString()
+      };
+
+      await this.triggerWebhook('new-lead', newJob);
+      
+      return newJob;
+    },
+
+    async updateJobStatus(jobId, newStatus, currentJobs) {
+      const job = currentJobs.find(j => j.id === jobId);
+      
+      if (newStatus === 'scheduled') {
+        await this.triggerWebhook('job-scheduled', job);
+      } else if (newStatus === 'in-progress') {
+        await this.triggerWebhook('job-started', job);
+      } else if (newStatus === 'done') {
+        await this.triggerWebhook('job-completed', job);
+      }
+
+      const updates = { status: newStatus, updatedAt: new Date().toISOString() };
+      if (newStatus === 'done') {
+        updates.completedAt = new Date().toISOString();
+      }
+
+      return { ...job, ...updates };
+    },
+
+    async triggerWebhook(event, data) {
+      const webhookUrl = `https://n8n.yourdomain.com/webhook/${event}`;
+      
+      console.log(`🔥 WEBHOOK TRIGGERED: ${event}`, data);
+      
+      return {
+        event,
+        timestamp: new Date().toISOString(),
+        data,
+        webhookUrl
+      };
+    },
+
+    generateStripeLink(job) {
+      return `https://checkout.stripe.com/pay/${job.id}`;
+    }
+  };
+
+  useEffect(() => {
+    const loadData = async () => {
+      const loadedJobs = await API.loadJobs();
+      setJobs(loadedJobs);
+      
+      const clientMap = {};
+      loadedJobs.forEach(job => {
+        if (!clientMap[job.phone]) {
+          clientMap[job.phone] = {
+            name: job.customer,
+            phone: job.phone,
+            address: job.address,
+            jobs: [],
+            totalSpent: 0,
+            lastContact: job.createdAt
+          };
+        }
+        clientMap[job.phone].jobs.push(job);
+        if (job.paid) {
+          clientMap[job.phone].totalSpent += job.value;
+        }
+        if (new Date(job.createdAt) > new Date(clientMap[job.phone].lastContact)) {
+          clientMap[job.phone].lastContact = job.createdAt;
+        }
+      });
+      
+      setClients(Object.values(clientMap).sort((a, b) => b.totalSpent - a.totalSpent));
+      setLoading(false);
+    };
+    loadData();
+  }, []);
+
+  useEffect(() => {
+    if (!loading && jobs.length > 0) {
+      API.saveJobs(jobs);
+      
+      const clientMap = {};
+      jobs.forEach(job => {
+        if (!clientMap[job.phone]) {
+          clientMap[job.phone] = {
+            name: job.customer,
+            phone: job.phone,
+            address: job.address,
+            jobs: [],
+            totalSpent: 0,
+            lastContact: job.createdAt
+          };
+        }
+        clientMap[job.phone].jobs.push(job);
+        if (job.paid) {
+          clientMap[job.phone].totalSpent += job.value;
+        }
+        if (new Date(job.createdAt) > new Date(clientMap[job.phone].lastContact)) {
+          clientMap[job.phone].lastContact = job.createdAt;
+        }
+      });
+      
+      setClients(Object.values(clientMap).sort((a, b) => b.totalSpent - a.totalSpent));
+    }
+  }, [jobs, loading]);
+
+  const logAutomation = (event, description, data) => {
+    const entry = {
+      id: Date.now(),
+      event,
+      description,
+      timestamp: new Date().toISOString(),
+      data
+    };
+    setAutomationLog(prev => [entry, ...prev.slice(0, 9)]);
+  };
+
+  const moveJob = async (jobId, newStatus) => {
+    const updatedJob = await API.updateJobStatus(jobId, newStatus, jobs);
+    
+    setJobs(jobs.map(job => 
+      job.id === jobId ? updatedJob : job
+    ));
+    
+    if (newStatus === 'scheduled') {
+      logAutomation('job-scheduled', 'SMS confirmation sent to customer', updatedJob);
+      logAutomation('calendar-sync', 'Added to Google Calendar', updatedJob);
+      logAutomation('reminder-set', '24h & 1h reminders scheduled', updatedJob);
+    } else if (newStatus === 'in-progress') {
+      logAutomation('job-started', 'Status updated in CRM', updatedJob);
+    } else if (newStatus === 'done') {
+      logAutomation('payment-link', 'Stripe invoice sent via SMS', updatedJob);
+      logAutomation('review-scheduled', 'Review request in 24h', updatedJob);
+    }
+  };
+
+  const markJobPaid = (jobId) => {
+    setJobs(jobs.map(job => 
+      job.id === jobId ? { ...job, paid: true } : job
+    ));
+    logAutomation('payment-received', 'Payment confirmed via Stripe', jobs.find(j => j.id === jobId));
+  };
+
+  const handleBookingSubmit = async () => {
+    if (!newBooking.customer || !newBooking.phone || !newBooking.address || !newBooking.date || !newBooking.time) {
+      alert('Please fill in all required fields');
+      return;
+    }
+    
+    const jobData = {
+      ...newBooking,
+      value: Math.floor(Math.random() * 400) + 200
+    };
+
+    const newJob = await API.createJob(jobData);
+    setJobs([...jobs, newJob]);
+    
+    logAutomation('new-lead', 'Lead captured → SMS sent to tradesman', newJob);
+    logAutomation('lead-logged', 'Logged to CRM/Google Sheets', newJob);
+    logAutomation('customer-sms', 'Confirmation SMS sent to customer', newJob);
+    
+    setNewBooking({ customer: '', phone: '', service: 'HVAC Repair', address: '', date: '', time: '', notes: '' });
+    setView('dashboard');
+    setShowAutomationPanel(true);
+  };
+
+  const getAnalyticsData = () => {
+    const last7Days = Array.from({length: 7}, (_, i) => {
+      const date = new Date();
+      date.setDate(date.getDate() - (6 - i));
+      return date.toISOString().split('T')[0];
+    });
+
+    const dailyData = last7Days.map(date => {
+      const dayJobs = jobs.filter(j => j.createdAt.split('T')[0] === date);
+      const dayCompleted = jobs.filter(j => j.completedAt && j.completedAt.split('T')[0] === date);
+      
+      return {
+        date: new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+        leads: dayJobs.length,
+        completed: dayCompleted.length,
+        revenue: dayCompleted.reduce((sum, j) => sum + (j.paid ? j.value : 0), 0)
+      };
+    });
+
+    const totalLeads = jobs.length;
+    const totalScheduled = jobs.filter(j => ['scheduled', 'in-progress', 'done'].includes(j.status)).length;
+    const totalCompleted = jobs.filter(j => j.status === 'done').length;
+    
+    const conversionRate = {
+      leadToScheduled: totalLeads > 0 ? ((totalScheduled / totalLeads) * 100).toFixed(1) : 0,
+      scheduledToCompleted: totalScheduled > 0 ? ((totalCompleted / totalScheduled) * 100).toFixed(1) : 0,
+      leadToCompleted: totalLeads > 0 ? ((totalCompleted / totalLeads) * 100).toFixed(1) : 0
+    };
+
+    const serviceBreakdown = services.map(service => ({
+      name: service,
+      value: jobs.filter(j => j.service === service && j.status === 'done').length
+    })).filter(s => s.value > 0);
+
+    return { dailyData, conversionRate, serviceBreakdown };
+  };
+
+  const getCalendarJobs = () => {
+    return jobs
+      .filter(j => ['scheduled', 'in-progress'].includes(j.status))
+      .sort((a, b) => new Date(a.date) - new Date(b.date));
+  };
+
+  const JobCard = ({ job }) => {
+    return (
+      <div className="bg-white rounded-lg shadow-md p-4 mb-3 border-l-4 hover:shadow-lg transition-shadow cursor-pointer"
+           style={{ borderLeftColor: statusConfig[job.status].hex }}
+           onClick={() => setSelectedJob(job)}>
+        <div className="flex justify-between items-start mb-2">
+          <h3 className="font-bold text-lg">{job.customer}</h3>
+          <span className={`text-xs px-2 py-1 rounded text-white ${statusConfig[job.status].color}`}>
+            {job.service}
+          </span>
+        </div>
+        
+        <div className="space-y-1 text-sm text-gray-600 mb-3">
+          <div className="flex items-center gap-2">
+            <Phone size={14} />
+            <span>{job.phone}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <MapPin size={14} />
+            <span>{job.address}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Calendar size={14} />
+            <span>{job.date} at {job.time}</span>
+          </div>
+        </div>
+
+        {job.notes && (
+          <p className="text-sm text-gray-500 mb-3 italic">"{job.notes}"</p>
+        )}
+
+        <div className="flex justify-between items-center">
+          <span className="font-bold text-green-600">${job.value}</span>
+          <div className="flex gap-1">
+            {job.status === 'new' && (
+              <button onClick={(e) => { e.stopPropagation(); moveJob(job.id, 'scheduled'); }}
+                      className="text-xs px-3 py-1 bg-yellow-500 text-white rounded hover:bg-yellow-600">
+                Schedule
+              </button>
+            )}
+            {job.status === 'scheduled' && (
+              <button onClick={(e) => { e.stopPropagation(); moveJob(job.id, 'in-progress'); }}
+                      className="text-xs px-3 py-1 bg-purple-500 text-white rounded hover:bg-purple-600">
+                Start Job
+              </button>
+            )}
+            {job.status === 'in-progress' && (
+              <button onClick={(e) => { e.stopPropagation(); moveJob(job.id, 'done'); }}
+                      className="text-xs px-3 py-1 bg-green-500 text-white rounded hover:bg-green-600">
+                Complete
+              </button>
+            )}
+            {job.status === 'done' && !job.paid && (
+              <button onClick={(e) => { e.stopPropagation(); markJobPaid(job.id); }}
+                      className="text-xs px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600">
+                Mark Paid
+              </button>
+            )}
+            {job.paid && (
+              <span className="text-xs px-3 py-1 bg-green-100 text-green-700 rounded">
+                ✓ Paid
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const AutomationPanel = () => {
+    return (
+      <div className="fixed right-0 top-0 h-full w-96 bg-gray-900 text-white shadow-2xl overflow-y-auto z-50">
+        <div className="p-4 border-b border-gray-700 flex justify-between items-center sticky top-0 bg-gray-900">
+          <div className="flex items-center gap-2">
+            <Zap className="text-yellow-400" size={20} />
+            <h2 className="font-bold text-lg">Automation Log</h2>
+          </div>
+          <button onClick={() => setShowAutomationPanel(false)}
+                  className="text-gray-400 hover:text-white">
+            ✕
+          </button>
+        </div>
+
+        <div className="p-4">
+          <div className="bg-gray-800 rounded p-3 mb-4">
+            <div className="flex items-center gap-2 mb-2">
+              <Webhook size={16} className="text-blue-400" />
+              <span className="text-sm font-bold">Webhook Endpoint</span>
+            </div>
+            <code className="text-xs text-green-400 break-all">
+              https://n8n.yourdomain.com/webhook/
+            </code>
+          </div>
+
+          {automationLog.length === 0 ? (
+            <p className="text-gray-500 text-sm text-center py-8">
+              No automations triggered yet.<br />
+              Create a booking or move a job to see webhooks fire!
+            </p>
+          ) : (
+            <div className="space-y-3">
+              {automationLog.map(log => (
+                <div key={log.id} className="bg-gray-800 rounded p-3 border-l-4 border-yellow-400">
+                  <div className="flex items-start justify-between mb-1">
+                    <span className="font-bold text-sm text-yellow-400">{log.event}</span>
+                    <span className="text-xs text-gray-500">
+                      {new Date(log.timestamp).toLocaleTimeString()}
+                    </span>
+                  </div>
+                  <p className="text-sm text-gray-300 mb-2">{log.description}</p>
+                  <details className="text-xs">
+                    <summary className="text-gray-500 cursor-pointer hover:text-gray-300">
+                      View payload →
+                    </summary>
+                    <pre className="mt-2 bg-gray-900 p-2 rounded overflow-x-auto text-green-400">
+                      {JSON.stringify(log.data, null, 2)}
+                    </pre>
+                  </details>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="p-4 border-t border-gray-700 bg-gray-800">
+          <h3 className="font-bold text-sm mb-2">Configured Automations:</h3>
+          <ul className="text-xs space-y-1 text-gray-400">
+            <li>✓ New lead → SMS to tradesman</li>
+            <li>✓ Job scheduled → Customer confirmation</li>
+            <li>✓ Job scheduled → Calendar sync</li>
+            <li>✓ Job completed → Payment link</li>
+            <li>✓ Job completed → Review request (24h delay)</li>
+            <li>✓ Missed call → SMS with booking link</li>
+          </ul>
+        </div>
+      </div>
+    );
+  };
+
+  const AnalyticsView = () => {
+    const { dailyData, conversionRate, serviceBreakdown } = getAnalyticsData();
+    const totalRevenue = jobs.filter(j => j.paid).reduce((sum, j) => sum + j.value, 0);
+    const avgJobValue = jobs.filter(j => j.paid).length > 0 
+      ? (totalRevenue / jobs.filter(j => j.paid).length).toFixed(0)
+      : 0;
+
+    const COLORS = ['#3b82f6', '#eab308', '#a855f7', '#22c55e', '#ef4444', '#f97316'];
+
+    return (
+      <div className="min-h-screen bg-gray-50 p-6">
+        <div className="max-w-7xl mx-auto">
+          <div className="flex justify-between items-center mb-6">
+            <h1 className="text-3xl font-bold text-gray-800">Analytics Dashboard</h1>
+            <button onClick={() => setView('dashboard')}
+                    className="text-sm bg-gray-200 px-4 py-2 rounded hover:bg-gray-300">
+              ← Back to Jobs
+            </button>
+          </div>
+
+          <div className="grid grid-cols-4 gap-4 mb-6">
+            <div className="bg-white p-6 rounded-lg shadow">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-gray-600 text-sm">Total Revenue</span>
+                <DollarSign className="text-green-500" size={20} />
+              </div>
+              <div className="text-3xl font-bold text-gray-800">${totalRevenue}</div>
+              <div className="text-xs text-gray-500 mt-1">{jobs.filter(j => j.paid).length} paid jobs</div>
+            </div>
+
+            <div className="bg-white p-6 rounded-lg shadow">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-gray-600 text-sm">Avg Job Value</span>
+                <TrendingUp className="text-blue-500" size={20} />
+              </div>
+              <div className="text-3xl font-bold text-gray-800">${avgJobValue}</div>
+              <div className="text-xs text-gray-500 mt-1">per completed job</div>
+            </div>
+
+            <div className="bg-white p-6 rounded-lg shadow">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-gray-600 text-sm">Conversion Rate</span>
+                <BarChart3 className="text-purple-500" size={20} />
+              </div>
+              <div className="text-3xl font-bold text-gray-800">{conversionRate.leadToCompleted}%</div>
+              <div className="text-xs text-gray-500 mt-1">lead to completed</div>
+            </div>
+
+            <div className="bg-white p-6 rounded-lg shadow">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-gray-600 text-sm">Active Clients</span>
+                <Users className="text-yellow-500" size={20} />
+              </div>
+              <div className="text-3xl font-bold text-gray-800">{clients.length}</div>
+              <div className="text-xs text-gray-500 mt-1">total clients</div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-6 mb-6">
+            <div className="bg-white p-6 rounded-lg shadow">
+              <h3 className="font-bold text-lg mb-4">Daily Metrics (Last 7 Days)</h3>
+              <ResponsiveContainer width="100%" height={250}>
+                <LineChart data={dailyData}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="date" style={{ fontSize: '12px' }} />
+                  <YAxis style={{ fontSize: '12px' }} />
+                  <Tooltip />
+                  <Line type="monotone" dataKey="leads" stroke="#3b82f6" strokeWidth={2} name="New Leads" />
+                  <Line type="monotone" dataKey="completed" stroke="#22c55e" strokeWidth={2} name="Completed" />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+
+            <div className="bg-white p-6 rounded-lg shadow">
+              <h3 className="font-bold text-lg mb-4">Revenue Trend</h3>
+              <ResponsiveContainer width="100%" height={250}>
+                <BarChart data={dailyData}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="date" style={{ fontSize: '12px' }} />
+                  <YAxis style={{ fontSize: '12px' }} />
+                  <Tooltip />
+                  <Bar dataKey="revenue" fill="#22c55e" name="Revenue ($)" />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-6">
+            <div className="bg-white p-6 rounded-lg shadow">
+              <h3 className="font-bold text-lg mb-4">Pipeline Conversion</h3>
+              <div className="space-y-4">
+                <div>
+                  <div className="flex justify-between text-sm mb-1">
+                    <span>Lead → Scheduled</span>
+                    <span className="font-bold">{conversionRate.leadToScheduled}%</span>
+                  </div>
+                  <div className="w-full bg-gray-200 rounded-full h-3">
+                    <div className="bg-blue-500 h-3 rounded-full" style={{width: `${conversionRate.leadToScheduled}%`}} />
+                  </div>
+                </div>
+                <div>
+                  <div className="flex justify-between text-sm mb-1">
+                    <span>Scheduled → Completed</span>
+                    <span className="font-bold">{conversionRate.scheduledToCompleted}%</span>
+                  </div>
+                  <div className="w-full bg-gray-200 rounded-full h-3">
+                    <div className="bg-purple-500 h-3 rounded-full" style={{width: `${conversionRate.scheduledToCompleted}%`}} />
+                  </div>
+                </div>
+                <div>
+                  <div className="flex justify-between text-sm mb-1">
+                    <span>Lead → Completed</span>
+                    <span className="font-bold">{conversionRate.leadToCompleted}%</span>
+                  </div>
+                  <div className="w-full bg-gray-200 rounded-full h-3">
+                    <div className="bg-green-500 h-3 rounded-full" style={{width: `${conversionRate.leadToCompleted}%`}} />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white p-6 rounded-lg shadow">
+              <h3 className="font-bold text-lg mb-4">Service Breakdown</h3>
+              {serviceBreakdown.length > 0 ? (
+                <ResponsiveContainer width="100%" height={200}>
+                  <PieChart>
+                    <Pie
+                      data={serviceBreakdown}
+                      cx="50%"
+                      cy="50%"
+                      labelLine={false}
+                      label={({ name, percent }) => `${name.split(' ')[0]} ${(percent * 100).toFixed(0)}%`}
+                      outerRadius={80}
+                      fill="#8884d8"
+                      dataKey="value"
+                    >
+                      {serviceBreakdown.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip />
+                  </PieChart>
+                </ResponsiveContainer>
+              ) : (
+                <p className="text-gray-500 text-center py-8">No completed jobs yet</p>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const CalendarView = () => {
+    const calendarJobs = getCalendarJobs();
+    
+    return (
+      <div className="min-h-screen bg-gray-50 p-6">
+        <div className="max-w-7xl mx-auto">
+          <div className="flex justify-between items-center mb-6">
+            <h1 className="text-3xl font-bold text-gray-800">Job Calendar</h1>
+            <button onClick={() => setView('dashboard')}
+                    className="text-sm bg-gray-200 px-4 py-2 rounded hover:bg-gray-300">
+              ← Back to Jobs
+            </button>
+          </div>
+
+          {calendarJobs.length === 0 ? (
+            <div className="bg-white rounded-lg shadow p-12 text-center">
+              <Calendar className="mx-auto mb-4 text-gray-400" size={48} />
+              <h3 className="text-xl font-bold text-gray-700 mb-2">No Scheduled Jobs</h3>
+              <p className="text-gray-500">Jobs will appear here once they're scheduled</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {calendarJobs.map(job => {
+                const jobDate = new Date(job.date);
+                const today = new Date();
+                today.setHours(0,0,0,0);
+                const isToday = jobDate.toDateString() === today.toDateString();
+                const isPast = jobDate < today;
+                
+                return (
+                  <div key={job.id} 
+                       className={`bg-white rounded-lg shadow p-6 border-l-4 ${isToday ? 'border-yellow-500 bg-yellow-50' : isPast ? 'border-gray-300 opacity-60' : 'border-blue-500'}`}>
+                    <div className="flex justify-between items-start">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-3 mb-2">
+                          <div className={`px-3 py-1 rounded text-sm font-bold ${isToday ? 'bg-yellow-500 text-white' : 'bg-blue-500 text-white'}`}>
+                            {isToday ? 'TODAY' : jobDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+                          </div>
+                          <span className="text-2xl font-bold text-gray-800">{job.time}</span>
+                        </div>
+                        <h3 className="text-xl font-bold text-gray-800 mb-2">{job.customer}</h3>
+                        <div className="space-y-1 text-sm text-gray-600">
+                          <div className="flex items-center gap-2">
+                            <Phone size={14} />
+                            <span>{job.phone}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <MapPin size={14} />
+                            <span>{job.address}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className={`px-2 py-1 rounded text-xs ${statusConfig[job.status].color} text-white`}>
+                              {job.service}
+                            </span>
+                          </div>
+                        </div>
+                        {job.notes && (
+                          <p className="text-sm text-gray-500 mt-2 italic">"{job.notes}"</p>
+                        )}
+                      </div>
+                      <div className="text-right">
+                        <div className="text-2xl font-bold text-green-600 mb-2">${job.value}</div>
+                        <span className={`text-xs px-3 py-1 rounded ${statusConfig[job.status].color} text-white`}>
+                          {statusConfig[job.status].label}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const ClientsView = () => {
+    return (
+      <div className="min-h-screen bg-gray-50 p-6">
+        <div className="max-w-7xl mx-auto">
+          <div className="flex justify-between items-center mb-6">
+            <h1 className="text-3xl font-bold text-gray-800">Client Profiles</h1>
+            <button onClick={() => setView('dashboard')}
+                    className="text-sm bg-gray-200 px-4 py-2 rounded hover:bg-gray-300">
+              ← Back to Jobs
+            </button>
+          </div>
+
+          {clients.length === 0 ? (
+            <div className="bg-white rounded-lg shadow p-12 text-center">
+              <Users className="mx-auto mb-4 text-gray-400" size={48} />
+              <h3 className="text-xl font-bold text-gray-700 mb-2">No Clients Yet</h3>
+              <p className="text-gray-500">Client profiles will appear here after jobs are created</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 gap-4">
+              {clients.map(client => (
+                <div key={client.phone} 
+                     className="bg-white rounded-lg shadow p-6 hover:shadow-lg transition-shadow cursor-pointer"
+                     onClick={() => setSelectedClient(client)}>
+                  <div className="flex justify-between items-start">
+                    <div className="flex-1">
+                      <h3 className="text-xl font-bold text-gray-800 mb-2">{client.name}</h3>
+                      <div className="space-y-1 text-sm text-gray-600 mb-3">
+                        <div className="flex items-center gap-2">
+                          <Phone size={14} />
+                          <span>{client.phone}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <MapPin size={14} />
+                          <span>{client.address}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Clock size={14} />
+                          <span>Last contact: {new Date(client.lastContact).toLocaleDateString()}</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-2xl font-bold text-green-600 mb-1">${client.totalSpent}</div>
+                      <div className="text-sm text-gray-500">Total Revenue</div>
+                      <div className="text-sm text-gray-500 mt-2">{client.jobs.length} jobs</div>
+                    </div>
+                  </div>
+                  
+                  <div className="mt-4 pt-4 border-t">
+                    <div className="flex gap-2 flex-wrap">
+                      {client.jobs.slice(0, 3).map(job => (
+                        <span key={job.id} className={`text-xs px-2 py-1 rounded ${statusConfig[job.status].color} text-white`}>
+                          {job.service}
+                        </span>
+                      ))}
+                      {client.jobs.length > 3 && (
+                        <span className="text-xs px-2 py-1 rounded bg-gray-200 text-gray-700">
+                          +{client.jobs.length - 3} more
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {selectedClient && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-40"
+               onClick={() => setSelectedClient(null)}>
+            <div className="bg-white rounded-xl p-6 max-w-2xl w-full max-h-[80vh] overflow-y-auto" 
+                 onClick={(e) => e.stopPropagation()}>
+              <div className="flex justify-between items-start mb-4">
+                <div>
+                  <h2 className="text-2xl font-bold mb-2">{selectedClient.name}</h2>
+                  <div className="space-y-1 text-sm text-gray-600">
+                    <div className="flex items-center gap-2">
+                      <Phone size={14} />
+                      <span>{selectedClient.phone}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <MapPin size={14} />
+                      <span>{selectedClient.address}</span>
+                    </div>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="text-3xl font-bold text-green-600">${selectedClient.totalSpent}</div>
+                  <div className="text-sm text-gray-500">Lifetime Value</div>
+                </div>
+              </div>
+
+              <div className="border-t pt-4">
+                <h3 className="font-bold text-lg mb-3">Job History ({selectedClient.jobs.length})</h3>
+                <div className="space-y-3">
+                  {selectedClient.jobs.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).map(job => (
+                    <div key={job.id} className="bg-gray-50 rounded p-4 border-l-4" style={{borderLeftColor: statusConfig[job.status].hex}}>
+                      <div className="flex justify-between items-start mb-2">
+                        <div>
+                          <span className={`text-xs px-2 py-1 rounded ${statusConfig[job.status].color} text-white`}>
+                            {job.service}
+                          </span>
+                          <div className="text-sm text-gray-600 mt-1">
+                            {new Date(job.createdAt).toLocaleDateString()} at {job.time}
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <div className="font-bold text-green-600">${job.value}</div>
+                          {job.paid && <span className="text-xs text-green-600">✓ Paid</span>}
+                        </div>
+                      </div>
+                      {job.notes && (
+                        <p className="text-sm text-gray-600 italic">"{job.notes}"</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <button onClick={() => setSelectedClient(null)}
+                      className="mt-6 w-full bg-gray-200 text-gray-700 py-2 rounded hover:bg-gray-300">
+                Close
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const RevenuePanel = () => {
+    const unpaidJobs = jobs.filter(j => j.status === 'done' && !j.paid);
+    const paidJobs = jobs.filter(j => j.paid);
+    const totalRevenue = paidJobs.reduce((sum, j) => sum + j.value, 0);
+    const pendingRevenue = unpaidJobs.reduce((sum, j) => sum + j.value, 0);
+
+    return (
+      <div className="min-h-screen bg-gray-50 p-6">
+        <div className="max-w-7xl mx-auto">
+          <div className="flex justify-between items-center mb-6">
+            <h1 className="text-3xl font-bold text-gray-800">Revenue & Payments</h1>
+            <button onClick={() => setView('dashboard')}
+                    className="text-sm bg-gray-200 px-4 py-2 rounded hover:bg-gray-300">
+              ← Back to Jobs
+            </button>
+          </div>
+
+          <div className="grid grid-cols-3 gap-6 mb-6">
+            <div className="bg-white p-6 rounded-lg shadow">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-gray-600 text-sm">Total Revenue</span>
+                <DollarSign className="text-green-500" size={20} />
+              </div>
+              <div className="text-4xl font-bold text-green-600">${totalRevenue}</div>
+              <div className="text-xs text-gray-500 mt-1">{paidJobs.length} paid jobs</div>
+            </div>
+
+            <div className="bg-white p-6 rounded-lg shadow">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-gray-600 text-sm">Pending Payment</span>
+                <Clock className="text-yellow-500" size={20} />
+              </div>
+              <div className="text-4xl font-bold text-yellow-600">${pendingRevenue}</div>
+              <div className="text-xs text-gray-500 mt-1">{unpaidJobs.length} unpaid jobs</div>
+            </div>
+
+            <div className="bg-white p-6 rounded-lg shadow">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-gray-600 text-sm">Projected Total</span>
+                <TrendingUp className="text-blue-500" size={20} />
+              </div>
+              <div className="text-4xl font-bold text-blue-600">${totalRevenue + pendingRevenue}</div>
+              <div className="text-xs text-gray-500 mt-1">when all collected</div>
+            </div>
+          </div>
+
+          {unpaidJobs.length > 0 && (
+            <div className="bg-white rounded-lg shadow mb-6">
+              <div className="p-6 border-b">
+                <h2 className="text-xl font-bold">Pending Payments</h2>
+                <p className="text-sm text-gray-500">Jobs completed but not yet paid</p>
+              </div>
+              <div className="p-6 space-y-4">
+                {unpaidJobs.map(job => (
+                  <div key={job.id} className="border rounded-lg p-4 hover:shadow-md transition-shadow">
+                    <div className="flex justify-between items-start mb-3">
+                      <div>
+                        <h3 className="font-bold text-lg">{job.customer}</h3>
+                        <div className="text-sm text-gray-600 space-y-1">
+                          <div className="flex items-center gap-2">
+                            <Phone size={14} />
+                            <span>{job.phone}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Calendar size={14} />
+                            <span>Completed: {new Date(job.completedAt).toLocaleDateString()}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs px-2 py-1 bg-green-100 text-green-700 rounded">
+                              {job.service}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-2xl font-bold text-gray-800 mb-2">${job.value}</div>
+                        <button 
+                          onClick={() => {
+                            const stripeLink = API.generateStripeLink(job);
+                            logAutomation('stripe-link-generated', `Payment link created for ${job.customer}`, { ...job, stripeLink });
+                            setShowAutomationPanel(true);
+                          }}
+                          className="text-xs px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 mb-2 flex items-center gap-1">
+                          <CreditCard size={14} />
+                          Generate Stripe Link
+                        </button>
+                        <button 
+                          onClick={() => markJobPaid(job.id)}
+                          className="text-xs px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 flex items-center gap-1">
+                          <CheckCircle size={14} />
+                          Mark as Paid
+                        </button>
+                      </div>
+                    </div>
+                    {job.notes && (
+                      <p className="text-sm text-gray-500 italic">"{job.notes}"</p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="bg-white rounded-lg shadow">
+            <div className="p-6 border-b">
+              <h2 className="text-xl font-bold">Payment History</h2>
+              <p className="text-sm text-gray-500">All completed and paid jobs</p>
+            </div>
+            {paidJobs.length === 0 ? (
+              <div className="p-12 text-center">
+                <CreditCard className="mx-auto mb-4 text-gray-400" size={48} />
+                <p className="text-gray-500">No payments received yet</p>
+              </div>
+            ) : (
+              <div className="p-6">
+                <div className="space-y-3">
+                  {paidJobs.sort((a, b) => new Date(b.completedAt) - new Date(a.completedAt)).map(job => (
+                    <div key={job.id} className="flex justify-between items-center p-4 bg-green-50 rounded border border-green-200">
+                      <div>
+                        <div className="font-bold">{job.customer}</div>
+                        <div className="text-sm text-gray-600">{job.service}</div>
+                        <div className="text-xs text-gray-500">
+                          Completed: {new Date(job.completedAt).toLocaleDateString()}
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-xl font-bold text-green-600">${job.value}</div>
+                        <div className="text-xs text-green-600 flex items-center gap-1">
+                          <CheckCircle size={12} />
+                          Paid
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <Database className="animate-pulse mx-auto mb-4" size={48} />
+          <p>Loading jobs...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (view === 'analytics') return <AnalyticsView />;
+  if (view === 'calendar') return <CalendarView />;
+  if (view === 'clients') return <ClientsView />;
+  if (view === 'revenue') return <RevenuePanel />;
+
+  if (view === 'booking') {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
+        <div className="max-w-2xl mx-auto">
+          <div className="bg-white rounded-xl shadow-lg p-8">
+            <div className="flex justify-between items-center mb-6">
+              <h1 className="text-3xl font-bold text-gray-800">Book a Service</h1>
+              <button onClick={() => setView('dashboard')}
+                      className="text-sm text-gray-600 hover:text-gray-800">
+                ← Back to Dashboard
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium mb-1">Your Name *</label>
+                <input type="text"
+                       value={newBooking.customer}
+                       onChange={(e) => setNewBooking({...newBooking, customer: e.target.value})}
+                       className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                       placeholder="John Doe" />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-1">Phone Number *</label>
+                <input type="tel"
+                       value={newBooking.phone}
+                       onChange={(e) => setNewBooking({...newBooking, phone: e.target.value})}
+                       className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                       placeholder="(555) 123-4567" />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-1">Service Needed</label>
+                <select value={newBooking.service}
+                        onChange={(e) => setNewBooking({...newBooking, service: e.target.value})}
+                        className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 focus:outline-none">
+                  {services.map(s => <option key={s}>{s}</option>)}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-1">Service Address *</label>
+                <input type="text"
+                       value={newBooking.address}
+                       onChange={(e) => setNewBooking({...newBooking, address: e.target.value})}
+                       className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                       placeholder="123 Main St, City, State" />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium mb-1">Preferred Date *</label>
+                  <input type="date"
+                         value={newBooking.date}
+                         onChange={(e) => setNewBooking({...newBooking, date: e.target.value})}
+                         className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 focus:outline-none" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">Preferred Time *</label>
+                  <input type="time"
+                         value={newBooking.time}
+                         onChange={(e) => setNewBooking({...newBooking, time: e.target.value})}
+                         className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 focus:outline-none" />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-1">Additional Notes</label>
+                <textarea value={newBooking.notes}
+                          onChange={(e) => setNewBooking({...newBooking, notes: e.target.value})}
+                          className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                          rows={3}
+                          placeholder="Describe the issue..." />
+              </div>
+
+              <button onClick={handleBookingSubmit}
+                      className="w-full bg-blue-600 text-white py-3 rounded-lg font-bold hover:bg-blue-700 transition">
+                Book Service
+              </button>
+            </div>
+
+            <div className="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded">
+              <div className="flex items-start gap-2">
+                <Zap size={16} className="text-yellow-600 mt-1" />
+                <div className="text-xs text-yellow-800">
+                  <strong>Automation Preview:</strong> When you submit, 3 webhooks will fire instantly to trigger SMS notifications and log the lead.
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <div className="bg-gradient-to-r from-blue-600 to-indigo-700 text-white p-6 shadow-lg">
+        <div className="max-w-7xl mx-auto">
+          <div className="flex justify-between items-center mb-4">
+            <div>
+              <h1 className="text-3xl font-bold">TradeFlow Dashboard</h1>
+              <p className="text-blue-100">Automation-powered job management</p>
+            </div>
+            <div className="flex gap-3">
+              <button onClick={() => setShowAutomationPanel(!showAutomationPanel)}
+                      className="bg-yellow-500 text-white px-6 py-2 rounded-lg font-bold hover:bg-yellow-600 transition flex items-center gap-2">
+                <Zap size={18} />
+                Automation Log
+                {automationLog.length > 0 && (
+                  <span className="bg-white text-yellow-600 text-xs px-2 py-1 rounded-full">
+                    {automationLog.length}
+                  </span>
+                )}
+              </button>
+              <button onClick={() => setView('booking')}
+                      className="bg-white text-blue-600 px-6 py-2 rounded-lg font-bold hover:bg-blue-50 transition">
+                + New Booking
+              </button>
+            </div>
+          </div>
+          
+          <div className="flex gap-2">
+            <button onClick={() => setView('dashboard')}
+                    className={`px-4 py-2 rounded ${view === 'dashboard' ? 'bg-white text-blue-600' : 'bg-blue-500 text-white hover:bg-blue-400'}`}>
+              Jobs Board
+            </button>
+            <button onClick={() => setView('analytics')}
+                    className="px-4 py-2 rounded bg-blue-500 text-white hover:bg-blue-400 flex items-center gap-2">
+              <BarChart3 size={16} />
+              Analytics
+            </button>
+            <button onClick={() => setView('calendar')}
+                    className="px-4 py-2 rounded bg-blue-500 text-white hover:bg-blue-400 flex items-center gap-2">
+              <Calendar size={16} />
+              Calendar
+            </button>
+            <button onClick={() => setView('clients')}
+                    className="px-4 py-2 rounded bg-blue-500 text-white hover:bg-blue-400 flex items-center gap-2">
+              <Users size={16} />
+              Clients
+            </button>
+            <button onClick={() => setView('revenue')}
+                    className="px-4 py-2 rounded bg-blue-500 text-white hover:bg-blue-400 flex items-center gap-2">
+              <DollarSign size={16} />
+              Revenue
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-white shadow-sm border-b">
+        <div className="max-w-7xl mx-auto p-4 grid grid-cols-4 gap-4">
+          <div className="text-center">
+            <div className="text-2xl font-bold text-blue-600">{jobs.filter(j => j.status === 'new').length}</div>
+            <div className="text-sm text-gray-600">New Leads</div>
+          </div>
+          <div className="text-center">
+            <div className="text-2xl font-bold text-yellow-600">{jobs.filter(j => j.status === 'scheduled').length}</div>
+            <div className="text-sm text-gray-600">Scheduled</div>
+          </div>
+          <div className="text-center">
+            <div className="text-2xl font-bold text-purple-600">{jobs.filter(j => j.status === 'in-progress').length}</div>
+            <div className="text-sm text-gray-600">In Progress</div>
+          </div>
+          <div className="text-center">
+            <div className="text-2xl font-bold text-green-600">${jobs.filter(j => j.paid).reduce((sum, j) => sum + j.value, 0)}</div>
+            <div className="text-sm text-gray-600">Completed Revenue</div>
+          </div>
+        </div>
+      </div>
+
+      <div className="max-w-7xl mx-auto p-6">
+        <div className="grid grid-cols-4 gap-4">
+          {Object.entries(statusConfig).map(([status, config]) => (
+            <div key={status} className="bg-gray-100 rounded-lg p-4">
+              <div className="flex items-center gap-2 mb-4">
+                <div className={`w-3 h-3 rounded-full ${config.color}`} />
+                <h2 className="font-bold text-gray-700">{config.label}</h2>
+                <span className="ml-auto bg-gray-200 text-gray-700 text-xs px-2 py-1 rounded-full">
+                  {jobs.filter(j => j.status === status).length}
+                </span>
+              </div>
+              <div className="space-y-3">
+                {jobs.filter(j => j.status === status).map(job => (
+                  <JobCard key={job.id} job={job} />
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {showAutomationPanel && <AutomationPanel />}
+
+      {selectedJob && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-40"
+             onClick={() => setSelectedJob(null)}>
+          <div className="bg-white rounded-xl p-6 max-w-lg w-full" onClick={(e) => e.stopPropagation()}>
+            <h2 className="text-2xl font-bold mb-4">{selectedJob.customer}</h2>
+            <div className="space-y-3 text-sm">
+              <div className="flex items-center gap-2">
+                <Phone size={16} className="text-gray-400" />
+                <span>{selectedJob.phone}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <MapPin size={16} className="text-gray-400" />
+                <span>{selectedJob.address}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Calendar size={16} className="text-gray-400" />
+                <span>{selectedJob.date} at {selectedJob.time}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <DollarSign size={16} className="text-gray-400" />
+                <span className="font-bold text-green-600">${selectedJob.value}</span>
+              </div>
+            </div>
+            {selectedJob.notes && (
+              <div className="mt-4 p-3 bg-gray-50 rounded">
+                <p className="text-sm text-gray-600">{selectedJob.notes}</p>
+              </div>
+            )}
+            {selectedJob.status === 'done' && !selectedJob.paid && (
+              <div className="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded">
+                <p className="text-sm text-yellow-800 mb-2">Payment pending</p>
+                <button 
+                  onClick={() => {
+                    const stripeLink = API.generateStripeLink(selectedJob);
+                    logAutomation('stripe-link-generated', `Payment link created`, { ...selectedJob, stripeLink });
+                    setShowAutomationPanel(true);
+                  }}
+                  className="w-full text-sm px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 mb-2">
+                  Generate Stripe Link
+                </button>
+              </div>
+            )}
+            <button onClick={() => setSelectedJob(null)}
+                    className="mt-6 w-full bg-gray-200 text-gray-700 py-2 rounded hover:bg-gray-300">
+              Close
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default TradeFlowMVP;
